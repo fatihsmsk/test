@@ -1,6 +1,6 @@
 #include "RTC_1302.h"
 #include <Config.h>
-
+#include "LoggerModule.h"
 
 // countof makrosu, C++'da dizi boyutunu güvenli bir şekilde almak için kullanılır.
 #ifndef countof
@@ -21,40 +21,40 @@ void RTC_Module::begin() {
 }
 
 void RTC_Module::initializeRtc() {
+    /*
     RtcDateTime compiled = RtcDateTime(__DATE__, __TIME__);
     Serial.print("RTC_Module: Derleme zamanı: ");
     printDateTimeToSerial(compiled);
     Serial.println();
 
     if (!_Rtc.IsDateTimeValid()) {
-        Serial.println("RTC_Module: RTC DateTime geçersiz! Derleme zamanına ayarlanıyor.");
+        LOG_INFO("RTC_Module: RTC DateTime geçersiz! Derleme zamanına ayarlanıyor.");
         _Rtc.SetDateTime(compiled);
-    }
+    }*/
 
     if (_Rtc.GetIsWriteProtected()) {
-        Serial.println("RTC_Module: RTC yazmaya karşı korumalıydı, yazma etkinleştiriliyor.");
+        LOG_INFO("RTC_Module: RTC yazmaya karşı korumalıydı, yazma etkinleştiriliyor.");
         _Rtc.SetIsWriteProtected(false);
     }
 
     if (!_Rtc.GetIsRunning()) {
-        Serial.println("RTC_Module: RTC çalışmıyordu, şimdi başlıyor.");
+        LOG_INFO("RTC_Module: RTC çalışmıyordu, şimdi başlıyor.");
         _Rtc.SetIsRunning(true);
     }
-
     RtcDateTime now = _Rtc.GetDateTime();
-    if (now < compiled) {
-        Serial.println("RTC derleme zamanından daha eskidir! (DateTime güncelleniyor)");
+    printDateTimeToSerial(now);
+    /*if (now < compiled) {
+        LOG_INFO("RTC derleme zamanından daha eskidir! (DateTime güncelleniyor)");
         _Rtc.SetDateTime(compiled);
     } else if (now > compiled) {
-        Serial.println("RTC derleme zamanından daha yenidir. (bu beklenen bir durumdur)");
+        LOG_INFO("RTC derleme zamanından daha yenidir. (bu beklenen bir durumdur)");
         printDateTimeToSerial(now);
-        Serial.println(); 
     } else if (now == compiled) {
-        Serial.println("RTC derleme zamanı ile aynıdır! ");
+        LOG_INFO("RTC derleme zamanı ile aynıdır! ");
         printDateTimeToSerial(now);
-        Serial.println();
-    }
+    }*/
 }
+    
 
 RtcDateTime RTC_Module::getDateTime() {
     return _Rtc.GetDateTime();
@@ -72,13 +72,13 @@ void RTC_Module::printDateTimeToSerial(const RtcDateTime& dt) {
                dt.Hour(),
                dt.Minute(),
                dt.Second());
-    Serial.print(datestring);
+    LOG_INFO(datestring);
 }
 
 String RTC_Module::getTimestamp() {
     RtcDateTime now = _Rtc.GetDateTime();
     if (!now.IsValid()) {
-        return "RTC Geçersiz Tarih ve Saat";
+        return "NOT_IMPLEMENTED_TIMESTAMP";
     }
     // YYYY-MM-DD HH:MM:SS formatı için
     char timestampBuffer[20]; 
@@ -90,4 +90,16 @@ String RTC_Module::getTimestamp() {
              now.Minute(),
              now.Second());
     return String(timestampBuffer);
+}
+
+void RTC_Module::setDateTime(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second) {
+    RtcDateTime newDateTime(year, month, day, hour, minute, second);
+    if (newDateTime.IsValid()) {
+        _Rtc.SetDateTime(newDateTime);
+        LOG_INFO("RTC zamanı başarıyla ayarlandı.");
+        printDateTimeToSerial(newDateTime);
+        Serial.println();
+    } else {
+        LOG_ERROR("RTC için ayarlanan tarih/saat geçersiz.");
+    }
 }
