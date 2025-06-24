@@ -1,5 +1,7 @@
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <Update.h>
 #include <ArduinoJson.h> // May not be needed directly if all JSON is in driver
 #include <inttypes.h>    // For PRIu64 definition
 #include <HardwareSerial.h> // For serial communication
@@ -16,6 +18,8 @@
 #include "sd_card.h"
 #include "RTC_1302.h" //rtc nesnesi için gerekli kütüphane
 
+String deviceId;
+
 RTC_Module rtc(RTC_IO_PIN, RTC_SCLK_PIN, RTC_CE_PIN); // RTC nesnemizi oluşturuyoruz
 
 HardwareSerial modemSerial(2); // Modem için
@@ -27,8 +31,9 @@ Communication_Driver commDriver(modemSerial, npkSensor, bmeSensor, rtc);
 
 RTC_DATA_ATTR int wakeCounter = 0;
 
+
 // Define the CSV header
-const char* csvHeader = "measurement_id,measurement_time,soil_nitrogen,soil_phosphorus,soil_potassium,soil_humidity,soil_temperature,soil_electrical_conductivity,soil_ph,weather_air_temperature,weather_air_humidity,weather_air_pressure,system_solar_panel_voltage,system_battery_voltage,system_supply_4V\n";
+const char* csvHeader = "measurement_id,measurement_time,soil_nitrogen,soil_phosphorus,soil_potassium,soil_humidity,soil_temperature,soil_electrical_conductivity,soil_ph,soil_salinity,soil_TDS,weather_air_temperature,weather_air_humidity,weather_air_pressure,system_solar_panel_voltage,system_battery_voltage,system_supply_4V\n";
 
 void powerUpSensors() {
     digitalWrite(PWRBME, HIGH);
@@ -55,17 +60,23 @@ void goToDeepSleep() {
 void setup() {
     Serial.begin(SERIAL_BAUD_RATE);
     LoggerInit();
+    WiFi.mode(WIFI_STA);
+    deviceId = WiFi.macAddress();
+    deviceId.replace(":", ""); // MAC adresindeki ':' karakterlerini kaldır
+    LOG_INFO("Cihaz ID (MAC Adresi): %s", deviceId.c_str());
+
     pinMode(PWR_sim808, OUTPUT);
     pinMode(PWRBME, OUTPUT);
     pinMode(PWRNPK, OUTPUT);
     digitalWrite(PWR_sim808, HIGH); // Modem için PWR pinini HIGH yap(kendiliğinden açılmasını engellemek için)
     modemSerial.begin(9600, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);    
     powerUpSensors();
+    delay(13000); // RTC'nin başlatılması için kısa bir gecikme
     rtc.begin(); 
     rtc.getTimestamp();
-    
    
     LOG_INFO("Sistem Başlatılıyor...");
+
     if (initSDCard()) { // initSDCard() sd_card.h/cpp içinden çağrılıyor
         // SD Kart başarıyla başlatıldıysa, veri dosyasını ve başlığını kontrol et/oluştur
         if (ensureDataFileWithHeader(SD, SD_DATA_FILE, csvHeader)) { // YENİ FONKSİYON ÇAĞRISI
@@ -88,6 +99,8 @@ void setup() {
     npkSensor.begin(); 
     LOG_INFO("NPK Sensörü başlatıldı.");    
     LOG_INFO("Kurulum tamamlandı.");
+
+    npkSensor.factorOffsetReset(); // Kalibrasyon ayarlarını sıfırla
 }
 
 void loop() {
@@ -157,14 +170,19 @@ void loop() {
                     } else {
                         LOG_ERROR("Dosya silinemedi: %s", SD_DATA_FILE);
                     }
+                    LOG_INFO("MQTT üzerinden gelen mesajlar dinleniyor (30 saniye)...");
+                    unsigned long listenStart = millis();
+                    while (millis() - listenStart < 30000) {
+                        commDriver.mqttLoop(); // MQTT mesajlarını işlemek için döngü
+                        //delay(100); // CPU tüketimini azaltmak için kısa gecikme
+                    }
+                    LOG_INFO("MQTT dinleme süresi sona erdi.");
+
                 } else {
                     LOG_ERROR("MQTT'ye AWS JSON gönderimi başarısız. Dosya silinmedi: %s", SD_DATA_FILE);
-                    // Data remains on SD card for next attempt.
-                    // Consider how to handle wakeCounter reset if send fails repeatedly.
                 }
             } else {
                 LOG_INFO("SD kartta gönderilecek yeterli veri yok (%s boş, sadece başlık veya okunamadı).", SD_DATA_FILE);
-                 // If file is empty or only has header, maybe reset it.
                 if (fileContent.length() > 0 && fileContent.indexOf('\n') == fileContent.lastIndexOf('\n') && wakeCounter > 0) {
                     LOG_INFO("Sadece başlık var gibi görünüyor, dosya siliniyor ve sayaç sıfırlanıyor.");
                     wakeCounter = 0;
